@@ -1,0 +1,68 @@
+{
+  "materials": [
+    { "name": "Asofe" },
+    { "name": "Enria" },
+	{ "name": "Thons" },
+    { "name": "Mold Glue" },
+    { "name": "Mold Hardener" },
+    { "name": "Mold Lubricant" },
+	{ "name": "Oriharukon Ore" },
+	{ "name": "Varnish" },
+	{ "name": "Iron Ore" },
+	{ "name": "Animal Skin" },
+	{ "name": "Coal" },
+	{ "name": "Charcoal" },
+	{ "name": "Thread" },
+	{ "name": "Mithril Ore" },
+	{ "name": "Suede" },
+	{ "name": "Stem" },
+    { "name": "Steel" },
+	{ "name": "Braided Hemp" },
+	{ "name": "Compound Braid" },
+    { "name": "Coarse Bone Powder" },
+	{ "name": "Metallic Fiber" },
+	{ "name": "Cokes" },
+	{ "name": "Cord" },
+    { "name": "Leather" },
+	{ "name": "Metallic Thread" },
+	{ "name": "Metal Hardener" },
+	{ "name": "Durable Metal Plate" },
+	{ "name": "Synthetic Cokes" },
+    { "name": "Varnish of Purity" },
+	{ "name": "Blacksmith Frame" },
+	{ "name": "Maestro Mold" },
+	{ "name": "Craftsman Mold" },
+	{ "name": "Maestro Anvil Lock" },
+	{ "name": "Maestro Holder" },
+	{ "name": "Silver Mold" },
+    { "name": "Steel Mold" },
+    { "name": "Mithril Alloy" },
+    { "name": "Oriharukon" },
+    { "name": "Gemstone A" },
+    { "name": "Gemstone S" },
+    { "name": "Crystal A" },
+    { "name": "Crystal S" }
+  ],
+  "keys": [],
+  "recipes": [],
+  "items": [
+    { "name": "Dark Crystal Robe", "type": "armor", "grade": "A" },
+    { "name": "Dark Crystal Gloves", "type": "armor", "grade": "A" },
+    { "name": "Dark Crystal Stockings", "type": "armor", "grade": "A" },
+    { "name": "Dark Crystal Boots", "type": "armor", "grade": "A" }
+  ],
+  "requirements": [
+  {
+    "item": "Dark Crystal Robe",
+    "materials": [
+      { "name": "Asofe", "quantity": 12 },
+      { "name": "Enria", "quantity": 15 },
+      { "name": "Mold Hardener", "quantity": 6 },
+      { "name": "Synthetic Cokes", "quantity": 20 },
+      { "name": "Varnish of Purity", "quantity": 30 },
+      { "name": "Gemstone A", "quantity": 120 },
+      { "name": "Crystal A", "quantity": 240 }
+    ]
+  }
+]
+}
