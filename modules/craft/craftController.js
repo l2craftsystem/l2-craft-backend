@@ -1,59 +1,52 @@
-const db = require("../../core/db");
+const supabase = require("../../core/supabase");
 
+// 🔹 USER INVENTORY
 async function getUserInventory() {
+  const { data, error } = await supabase
+    .from("user_inventory")
+    .select("item_id, quantity, items(name)");
 
-  const result = await db.query(`
-    SELECT i.name, ui.quantity
-    FROM user_inventory ui
-    JOIN items i ON i.id = ui.item_id
-  `);
+  if (error) throw error;
 
   const inventory = {};
-
-  result.rows.forEach(row => {
-    inventory[row.name] = row.quantity;
+  data.forEach(row => {
+    inventory[row.items.name] = row.quantity;
   });
-
   return inventory;
 }
 
 // 🔹 TOTAL RECURSIVO
 async function aggregateMaterials(itemId, amount, totals = {}) {
+  const { data: recipeData } = await supabase
+    .from("recipes")
+    .select("id, result_count")
+    .eq("result_item_id", itemId)
+    .limit(1);
 
-  const recipeResult = await db.query(`
-    SELECT id, result_count
-    FROM recipes
-    WHERE result_item_id = $1
-  `, [itemId]);
+  if (!recipeData || recipeData.length === 0) {
+    const { data: itemData } = await supabase
+      .from("items")
+      .select("name")
+      .eq("id", itemId)
+      .limit(1);
 
-  if (recipeResult.rows.length === 0) {
-
-    const itemResult = await db.query(`
-      SELECT name FROM items WHERE id = $1
-    `, [itemId]);
-
-    const name = itemResult.rows[0].name;
-
+    const name = itemData[0].name;
     if (!totals[name]) totals[name] = 0;
     totals[name] += amount;
-
     return totals;
   }
 
-  const recipe = recipeResult.rows[0];
-
+  const recipe = recipeData[0];
   const crafts = Math.ceil(amount / recipe.result_count);
 
-  const materialsResult = await db.query(`
-    SELECT m.id, m.name, rm.count
-    FROM recipe_materials rm
-    JOIN items m ON m.id = rm.item_id
-    WHERE rm.recipe_id = $1
-  `, [recipe.id]);
+  const { data: mats } = await supabase
+    .from("recipe_materials")
+    .select("item_id, count")
+    .eq("recipe_id", recipe.id);
 
-  for (const mat of materialsResult.rows) {
+  for (const mat of mats) {
     const total = mat.count * crafts;
-    await aggregateMaterials(mat.id, total, totals);
+    await aggregateMaterials(mat.item_id, total, totals);
   }
 
   return totals;
@@ -61,18 +54,19 @@ async function aggregateMaterials(itemId, amount, totals = {}) {
 
 // 🔹 TREE
 async function buildNode(id, quantity) {
+  const { data: itemData } = await supabase
+    .from("items")
+    .select("id,name")
+    .eq("id", id)
+    .limit(1);
 
-  const itemResult = await db.query(`
-    SELECT id, name FROM items WHERE id = $1
-  `, [id]);
+  const item = itemData[0];
 
-  const item = itemResult.rows[0];
-
-  const recipeResult = await db.query(`
-    SELECT id, result_count
-    FROM recipes
-    WHERE result_item_id = $1
-  `, [id]);
+  const { data: recipeData } = await supabase
+    .from("recipes")
+    .select("id, result_count")
+    .eq("result_item_id", id)
+    .limit(1);
 
   const node = {
     id: item.id,
@@ -81,22 +75,18 @@ async function buildNode(id, quantity) {
     materials: []
   };
 
-  if (recipeResult.rows.length === 0) return node;
+  if (!recipeData || recipeData.length === 0) return node;
 
-  const recipe = recipeResult.rows[0];
-
+  const recipe = recipeData[0];
   const crafts = Math.ceil(quantity / recipe.result_count);
 
-  const matsResult = await db.query(`
-    SELECT item_id, count
-    FROM recipe_materials
-    WHERE recipe_id = $1
-  `, [recipe.id]);
+  const { data: mats } = await supabase
+    .from("recipe_materials")
+    .select("item_id, count")
+    .eq("recipe_id", recipe.id);
 
-  for (const m of matsResult.rows) {
-    node.materials.push(
-      await buildNode(m.item_id, m.count * crafts)
-    );
+  for (const m of mats) {
+    node.materials.push(await buildNode(m.item_id, m.count * crafts));
   }
 
   return node;
@@ -104,18 +94,15 @@ async function buildNode(id, quantity) {
 
 // 🔹 TREE API
 async function craftTree(req, res) {
-
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
   const tree = await buildNode(itemId, amount);
-
   res.json(tree);
 }
 
 // 🔹 TOTAL
 async function craftTotal(req, res) {
-
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
@@ -123,63 +110,38 @@ async function craftTotal(req, res) {
   const inventory = await getUserInventory();
 
   const materials = Object.entries(totals).map(([name, required]) => {
-
     const owned = inventory[name] || 0;
     const missing = Math.max(0, required - owned);
-
-    return {
-      name,
-      required,
-      owned,
-      missing
-    };
-
+    return { name, required, owned, missing };
   });
 
   res.json({ materials });
 }
 
-// 🔥 CONSUMO REAL
+// 🔹 EXECUTE CRAFT
 async function executeCraft(req, res) {
-
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
-  const invResult = await db.query(`
-    SELECT ui.item_id, i.name, ui.quantity
-    FROM user_inventory ui
-    JOIN items i ON i.id = ui.item_id
-  `);
-
-  const inventory = {};
-
-  invResult.rows.forEach(i => {
-    inventory[i.name] = {
-      id: i.item_id,
-      quantity: i.quantity
-    };
-  });
+  const inventoryRows = await getUserInventory();
 
   const tree = await buildNode(itemId, amount);
 
   async function process(node, needed) {
-
-    const inv = inventory[node.name];
-    let available = inv ? inv.quantity : 0;
-
+    const available = inventoryRows[node.name] || 0;
     const used = Math.min(available, needed);
-
-    if (inv) inv.quantity -= used;
+    inventoryRows[node.name] = available - used;
 
     const remaining = needed - used;
-
     if (remaining === 0) return;
 
-    const recipeResult = await db.query(`
-      SELECT id FROM recipes WHERE result_item_id = $1
-    `, [node.id]);
+    const { data: recipeData } = await supabase
+      .from("recipes")
+      .select("id")
+      .eq("result_item_id", node.id)
+      .limit(1);
 
-    if (remaining > 0 && recipeResult.rows.length === 0) {
+    if (remaining > 0 && (!recipeData || recipeData.length === 0)) {
       throw new Error(`Faltan materiales base: ${node.name}`);
     }
 
@@ -195,18 +157,21 @@ async function executeCraft(req, res) {
       await process(child, child.quantity);
     }
   } catch (err) {
-    return res.status(400).json({
-      success: false,
-      error: err.message
-    });
+    return res.status(400).json({ success: false, error: err.message });
   }
 
-  for (const item of Object.values(inventory)) {
-    await db.query(`
-      UPDATE user_inventory
-      SET quantity = $1
-      WHERE item_id = $2
-    `, [item.quantity, item.id]);
+  // Guardar inventario actualizado
+  for (const [name, obj] of Object.entries(inventoryRows)) {
+    const { data: items } = await supabase
+      .from("items")
+      .select("id")
+      .eq("name", name)
+      .limit(1);
+    if (items.length > 0) {
+      await supabase
+        .from("user_inventory")
+        .upsert({ item_id: items[0].id, quantity: obj });
+    }
   }
 
   res.json({ success: true });

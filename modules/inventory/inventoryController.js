@@ -1,46 +1,49 @@
-const db = require("../../core/db");
+const supabase = require("../../core/supabase");
 
 async function getInventory(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from("user_inventory")
+      .select("item_id, quantity, items(name)")
+      .order("item_id");
 
-  const result = await db.query(`
-    SELECT i.name as item_name, ui.quantity
-    FROM user_inventory ui
-    JOIN items i ON i.id = ui.item_id
-  `);
+    if (error) throw error;
 
-  const rows = result.rows;
+    const inventory = {};
+    data.forEach(r => inventory[r.items.name] = r.quantity);
 
-  const inventory = {};
-
-  rows.forEach(r => {
-    inventory[r.item_name] = r.quantity;
-  });
-
-  res.json(inventory);
+    res.json(inventory);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 async function updateInventory(req, res) {
+  try {
+    const { name, quantity } = req.body;
 
-  const { name, quantity } = req.body;
+    // Buscar item por nombre
+    const { data: items, error: itemError } = await supabase
+      .from("items")
+      .select("id")
+      .eq("name", name)
+      .limit(1);
 
-  const itemResult = await db.query(`
-    SELECT id FROM items WHERE name = $1
-  `, [name]);
+    if (itemError) throw itemError;
+    if (!items || items.length === 0) return res.status(404).json({ error: "Item no encontrado" });
 
-  if (itemResult.rows.length === 0) {
-    return res.status(404).json({ error: "Item no encontrado" });
+    const itemId = items[0].id;
+
+    // Upsert en inventory
+    const { error } = await supabase
+      .from("user_inventory")
+      .upsert({ item_id: itemId, quantity });
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const itemId = itemResult.rows[0].id;
-
-  await db.query(`
-    INSERT INTO user_inventory (item_id, quantity)
-    VALUES ($1, $2)
-    ON CONFLICT (item_id)
-    DO UPDATE SET quantity = EXCLUDED.quantity
-  `, [itemId, quantity]);
-
-  res.json({ success: true });
 }
 
 module.exports = {
