@@ -1,66 +1,34 @@
-const { getDatabase } = require('./database');
+const { supabase } = require('./supabase');
 
-function runMigrations() {
+async function runMigrations() {
+  console.log("Ejecutando migraciones en Supabase...");
 
-  const db = getDatabase();
+  // Ejemplo de creación de tablas (solo si no existen)
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS materials (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL
+    );`,
+    `CREATE TABLE IF NOT EXISTS items (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      type TEXT NOT NULL,
+      grade TEXT
+    );`,
+    `CREATE TABLE IF NOT EXISTS requirements (
+      id SERIAL PRIMARY KEY,
+      item_id INT NOT NULL REFERENCES items(id),
+      material_id INT NOT NULL REFERENCES materials(id),
+      quantity INT NOT NULL
+    );`
+  ];
 
-  console.log("Ejecutando migraciones...");
+  for (const query of tables) {
+    const { error } = await supabase.rpc('run_sql', { sql: query });
+    if (error) console.log("Error migración:", error.message);
+  }
 
-  db.exec(`
-
-  CREATE TABLE IF NOT EXISTS materials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    grade TEXT,
-    item_type TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS recipes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    grade TEXT,
-    item_type TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    type TEXT NOT NULL,
-    grade TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS requirements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id INTEGER NOT NULL,
-    material_id INTEGER NOT NULL,
-    quantity INTEGER NOT NULL,
-    FOREIGN KEY(item_id) REFERENCES items(id),
-    FOREIGN KEY(material_id) REFERENCES materials(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    material_id INTEGER NOT NULL,
-    quantity INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY(material_id) REFERENCES materials(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS craft_queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id INTEGER NOT NULL,
-    multiplier INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(item_id) REFERENCES items(id)
-  );
-
-  `);
-
-  console.log("Migraciones ejecutadas.");
-
+  console.log("Migraciones ejecutadas en Supabase.");
 }
 
 module.exports = runMigrations;

@@ -1,15 +1,13 @@
 require("dotenv").config();
-
 const express = require('express');
 const cors = require('cors');
-const { getDatabase } = require('./database');
+const { supabase } = require('./supabase');
 
 const itemsRoutes = require('../modules/items/routes');
 const craftRoutes = require("../modules/craft/craftRoutes");
-const inventoryRoutes = require("../modules/inventory/inventoryRoutes"); // ✅ FIX
+const inventoryRoutes = require("../modules/inventory/inventoryRoutes"); 
 
 function createApp() {
-
   const app = express();
 
   app.use(cors());
@@ -19,16 +17,11 @@ function createApp() {
   app.use("/craft", craftRoutes);
   app.use("/inventory", inventoryRoutes);
 
-  app.get('/debug/requirements', (req, res) => {
-
-    const db = getDatabase();
-
-    const rows = db.prepare(`
-      SELECT * FROM requirements
-    `).all();
-
-    res.json(rows);
-
+  // Debug route usando Supabase
+  app.get('/debug/requirements', async (req, res) => {
+    const { data, error } = await supabase.from('requirements').select('*');
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
   });
 
   return app;
