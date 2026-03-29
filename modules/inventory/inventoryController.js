@@ -1,34 +1,44 @@
-const { getDatabase } = require("../../core/database");
+const db = require("../../core/db");
 
-function getInventory(req, res) {
+async function getInventory(req, res) {
 
-  const db = getDatabase();
+  const result = await db.query(`
+    SELECT i.name as item_name, ui.quantity
+    FROM user_inventory ui
+    JOIN items i ON i.id = ui.item_id
+  `);
 
-  const rows = db.prepare(`
-    SELECT item_name, quantity
-    FROM user_inventory
-  `).all();
+  const rows = result.rows;
 
-  const result = {};
+  const inventory = {};
 
   rows.forEach(r => {
-    result[r.item_name] = r.quantity;
+    inventory[r.item_name] = r.quantity;
   });
 
-  res.json(result);
+  res.json(inventory);
 }
 
-function updateInventory(req, res) {
+async function updateInventory(req, res) {
 
-  const db = getDatabase();
   const { name, quantity } = req.body;
 
-  db.prepare(`
-    INSERT INTO user_inventory (item_name, quantity)
-    VALUES (?, ?)
-    ON CONFLICT(item_name)
-    DO UPDATE SET quantity = excluded.quantity
-  `).run(name, quantity);
+  const itemResult = await db.query(`
+    SELECT id FROM items WHERE name = $1
+  `, [name]);
+
+  if (itemResult.rows.length === 0) {
+    return res.status(404).json({ error: "Item no encontrado" });
+  }
+
+  const itemId = itemResult.rows[0].id;
+
+  await db.query(`
+    INSERT INTO user_inventory (item_id, quantity)
+    VALUES ($1, $2)
+    ON CONFLICT (item_id)
+    DO UPDATE SET quantity = EXCLUDED.quantity
+  `, [itemId, quantity]);
 
   res.json({ success: true });
 }

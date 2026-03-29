@@ -1,186 +1,160 @@
 const express = require('express');
-const { getDatabase } = require('../../core/database');
+const db = require('../../core/db');
 
 const router = express.Router();
-
-
 
 /*
 ==============================
 LISTAR ITEMS
-GET /items
 ==============================
 */
+router.get('/', async (req, res) => {
 
-router.get('/', (req, res) => {
-
-  const db = getDatabase();
-
-  const items = db.prepare(`
+  const result = await db.query(`
     SELECT id, name, type
     FROM items
     ORDER BY name
     LIMIT 200
-  `).all();
+  `);
 
-  res.json(items);
+  res.json(result.rows);
 
 });
 
-
-
 /*
 ==============================
-BUSCAR ITEMS
-GET /items/search?q=sword
+SEARCH
 ==============================
 */
-
-router.get('/search', (req, res) => {
-
-  const db = getDatabase();
+router.get('/search', async (req, res) => {
 
   const q = req.query.q;
 
-  if (!q) {
-    return res.json([]);
-  }
+  if (!q) return res.json([]);
 
-  const rows = db.prepare(`
+  const result = await db.query(`
     SELECT id, name, type
     FROM items
-    WHERE name LIKE ?
+    WHERE name ILIKE $1
     ORDER BY name
     LIMIT 30
-  `).all(`%${q}%`);
+  `, [`%${q}%`]);
 
-  res.json(rows);
+  res.json(result.rows);
 
 });
 
-router.get("/craft", (req, res) => {
+/*
+==============================
+CRAFT
+==============================
+*/
+router.get("/craft", async (req, res) => {
 
-  const db = getDatabase();
-
-  const rows = db.prepare(`
-
+  const result = await db.query(`
     SELECT id,name,category
-	FROM items
-	WHERE grade='s'
-	AND (
-		category='weapon'
-		OR (category='armor' AND name LIKE 'Sealed%')
-		OR (category='jewel' AND name LIKE 'Sealed%')
-	)
-	ORDER BY
-	CASE
-	  WHEN category='weapon' THEN 1
-	  WHEN category='armor' THEN 2
-	  WHEN category='jewel' THEN 3
-	END,
-	name;
+    FROM items
+    WHERE grade='s'
+    AND (
+      category='weapon'
+      OR (category='armor' AND name LIKE 'Sealed%')
+      OR (category='jewel' AND name LIKE 'Sealed%')
+    )
+    ORDER BY
+    CASE
+      WHEN category='weapon' THEN 1
+      WHEN category='armor' THEN 2
+      WHEN category='jewel' THEN 3
+    END,
+    name;
+  `);
 
-  `).all();
-
-  res.json(rows);
-
-});
-
-router.get("/recipes", (req, res) => {
-
-  const db = getDatabase();
-
-  const rows = db.prepare(`
-
-    SELECT id, name
-FROM items
-WHERE category='recipe'
-AND grade='s'
-ORDER BY name;
-
-  `).all();
-
-  res.json(rows);
-
-});
-
-
-
-
-/*
-==============================
-verificar item crafteable
-==============================
-*/
-router.get("/materials", (req, res) => {
-
-  const db = getDatabase();
-
-  const rows = db.prepare(`
-
-	SELECT id,name,category,grade
-		FROM items
-		WHERE category IN ('crystal','gem','material')
-		ORDER BY
-		CASE category
-		WHEN 'crystal' THEN 1
-		WHEN 'gem' THEN 2
-		WHEN 'material' THEN 3
-		END,
-		grade DESC,
-		name ASC;
-  `).all();
-
-  res.json(rows);
-
-});
-
-router.get("/keys", (req, res) => {
-
-  const db = getDatabase();
-
-  const rows = db.prepare(`
-
-    SELECT id, name
-FROM items
-WHERE category='key'
-AND grade='s'
-ORDER BY name;
-
-  `).all();
-
-  res.json(rows);
+  res.json(result.rows);
 
 });
 
 /*
 ==============================
-VER ITEM
-GET /items/:id
+RECIPES
 ==============================
 */
+router.get("/recipes", async (req, res) => {
 
-router.get('/:id', (req, res) => {
+  const result = await db.query(`
+    SELECT id, name
+    FROM items
+    WHERE category='recipe'
+    AND grade='s'
+    ORDER BY name;
+  `);
 
-  const db = getDatabase();
+  res.json(result.rows);
 
-  const id = req.params.id;
+});
 
-  const item = db.prepare(`
+/*
+==============================
+MATERIALS
+==============================
+*/
+router.get("/materials", async (req, res) => {
+
+  const result = await db.query(`
+    SELECT id,name,category,grade
+    FROM items
+    WHERE category IN ('crystal','gem','material')
+    ORDER BY
+    CASE category
+    WHEN 'crystal' THEN 1
+    WHEN 'gem' THEN 2
+    WHEN 'material' THEN 3
+    END,
+    grade DESC,
+    name ASC;
+  `);
+
+  res.json(result.rows);
+
+});
+
+/*
+==============================
+KEYS
+==============================
+*/
+router.get("/keys", async (req, res) => {
+
+  const result = await db.query(`
+    SELECT id, name
+    FROM items
+    WHERE category='key'
+    AND grade='s'
+    ORDER BY name;
+  `);
+
+  res.json(result.rows);
+
+});
+
+/*
+==============================
+ITEM BY ID
+==============================
+*/
+router.get('/:id', async (req, res) => {
+
+  const result = await db.query(`
     SELECT id, name, type
     FROM items
-    WHERE id = ?
-  `).get(id);
+    WHERE id = $1
+  `, [req.params.id]);
 
-  if (!item) {
-    return res.status(404).json({
-      error: 'Item no encontrado'
-    });
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Item no encontrado' });
   }
 
-  res.json(item);
+  res.json(result.rows[0]);
 
 });
-
 
 module.exports = router;

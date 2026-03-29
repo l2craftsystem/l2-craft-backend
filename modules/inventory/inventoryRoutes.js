@@ -1,42 +1,46 @@
 const express = require("express");
-const { getDatabase } = require("../../core/database");
+const db = require("../../core/db");
 
 const router = express.Router();
 
 /*
 ================================
 POST /inventory
-Guardar o actualizar cantidad
 ================================
 */
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
 
-  const db = getDatabase();
   const { name, quantity } = req.body;
 
-  const item = db.prepare(`
-    SELECT id FROM items WHERE name = ?
-  `).get(name);
+  const itemResult = await db.query(`
+    SELECT id FROM items WHERE name = $1
+  `, [name]);
 
-  if (!item) {
+  if (itemResult.rows.length === 0) {
     return res.status(404).json({ error: "Item no encontrado" });
   }
 
-  const existing = db.prepare(`
-    SELECT id FROM user_inventory WHERE item_id = ?
-  `).get(item.id);
+  const itemId = itemResult.rows[0].id;
 
-  if (existing) {
-    db.prepare(`
+  const existing = await db.query(`
+    SELECT id FROM user_inventory WHERE item_id = $1
+  `, [itemId]);
+
+  if (existing.rows.length > 0) {
+
+    await db.query(`
       UPDATE user_inventory
-      SET quantity = ?
-      WHERE item_id = ?
-    `).run(quantity, item.id);
+      SET quantity = $1
+      WHERE item_id = $2
+    `, [quantity, itemId]);
+
   } else {
-    db.prepare(`
+
+    await db.query(`
       INSERT INTO user_inventory (item_id, quantity)
-      VALUES (?, ?)
-    `).run(item.id, quantity);
+      VALUES ($1, $2)
+    `, [itemId, quantity]);
+
   }
 
   res.json({ success: true });
@@ -46,20 +50,17 @@ router.post("/", (req, res) => {
 /*
 ================================
 GET /inventory
-Traer inventario completo
 ================================
 */
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
 
-  const db = getDatabase();
-
-  const rows = db.prepare(`
+  const result = await db.query(`
     SELECT items.name, user_inventory.quantity
     FROM user_inventory
     JOIN items ON items.id = user_inventory.item_id
-  `).all();
+  `);
 
-  res.json(rows);
+  res.json(result.rows);
 
 });
 

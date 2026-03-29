@@ -1,67 +1,78 @@
-const { getDatabase } = require("../../core/database");
+const db = require("../../core/db");
 
-function getUserInventory(db) {
+async function getUserInventory() {
 
-  const rows = db.prepare(`
+  const result = await db.query(`
     SELECT i.name, ui.quantity
     FROM user_inventory ui
     JOIN items i ON i.id = ui.item_id
-  `).all();
+  `);
 
   const inventory = {};
 
-  rows.forEach(row => {
+  result.rows.forEach(row => {
     inventory[row.name] = row.quantity;
   });
 
   return inventory;
 }
 
-// 🔹 TOTAL RECURSIVO (sin consumo)
-function aggregateMaterials(db, itemId, amount, totals = {}) {
+// 🔹 TOTAL RECURSIVO
+async function aggregateMaterials(itemId, amount, totals = {}) {
 
-  const recipe = db.prepare(`
+  const recipeResult = await db.query(`
     SELECT id, result_count
     FROM recipes
-    WHERE result_item_id = ?
-  `).get(itemId);
+    WHERE result_item_id = $1
+  `, [itemId]);
 
-  if (!recipe) {
-    const item = db.prepare(`SELECT name FROM items WHERE id = ?`).get(itemId);
+  if (recipeResult.rows.length === 0) {
 
-    if (!totals[item.name]) totals[item.name] = 0;
-    totals[item.name] += amount;
+    const itemResult = await db.query(`
+      SELECT name FROM items WHERE id = $1
+    `, [itemId]);
+
+    const name = itemResult.rows[0].name;
+
+    if (!totals[name]) totals[name] = 0;
+    totals[name] += amount;
 
     return totals;
   }
 
+  const recipe = recipeResult.rows[0];
+
   const crafts = Math.ceil(amount / recipe.result_count);
 
-  const materials = db.prepare(`
+  const materialsResult = await db.query(`
     SELECT m.id, m.name, rm.count
     FROM recipe_materials rm
     JOIN items m ON m.id = rm.item_id
-    WHERE rm.recipe_id = ?
-  `).all(recipe.id);
+    WHERE rm.recipe_id = $1
+  `, [recipe.id]);
 
-  materials.forEach((mat) => {
+  for (const mat of materialsResult.rows) {
     const total = mat.count * crafts;
-    aggregateMaterials(db, mat.id, total, totals);
-  });
+    await aggregateMaterials(mat.id, total, totals);
+  }
 
   return totals;
 }
 
-// 🔹 TREE SIMPLE
-function buildNode(db, id, quantity) {
+// 🔹 TREE
+async function buildNode(id, quantity) {
 
-  const item = db.prepare(`SELECT id, name FROM items WHERE id = ?`).get(id);
+  const itemResult = await db.query(`
+    SELECT id, name FROM items WHERE id = $1
+  `, [id]);
 
-  const recipe = db.prepare(`
+  const item = itemResult.rows[0];
+
+  const recipeResult = await db.query(`
     SELECT id, result_count
     FROM recipes
-    WHERE result_item_id = ?
-  `).get(id);
+    WHERE result_item_id = $1
+  `, [id]);
 
   const node = {
     id: item.id,
@@ -70,85 +81,46 @@ function buildNode(db, id, quantity) {
     materials: []
   };
 
-  if (!recipe) return node;
+  if (recipeResult.rows.length === 0) return node;
+
+  const recipe = recipeResult.rows[0];
 
   const crafts = Math.ceil(quantity / recipe.result_count);
 
-  const mats = db.prepare(`
+  const matsResult = await db.query(`
     SELECT item_id, count
     FROM recipe_materials
-    WHERE recipe_id = ?
-  `).all(recipe.id);
+    WHERE recipe_id = $1
+  `, [recipe.id]);
 
-  mats.forEach(m => {
+  for (const m of matsResult.rows) {
     node.materials.push(
-      buildNode(db, m.item_id, m.count * crafts)
+      await buildNode(m.item_id, m.count * crafts)
     );
-  });
+  }
 
   return node;
 }
 
-// 🔹 CALCULATOR SIMPLE
-function craftCalculator(req, res) {
-
-  const db = getDatabase();
+// 🔹 TREE API
+async function craftTree(req, res) {
 
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
-  const recipe = db.prepare(`
-    SELECT id, result_count
-    FROM recipes
-    WHERE result_item_id = ?
-  `).get(itemId);
-
-  if (!recipe) {
-    return res.json({
-      materials: [{ name: "Base Item", quantity: amount }]
-    });
-  }
-
-  const crafts = Math.ceil(amount / recipe.result_count);
-
-  const materials = db.prepare(`
-    SELECT m.name, rm.count
-    FROM recipe_materials rm
-    JOIN items m ON m.id = rm.item_id
-    WHERE rm.recipe_id = ?
-  `).all(recipe.id);
-
-  const result = materials.map((mat) => ({
-    name: mat.name,
-    quantity: mat.count * crafts
-  }));
-
-  res.json({ materials: result });
-}
-
-// 🔹 TREE
-function craftTree(req, res) {
-
-  const db = getDatabase();
-
-  const itemId = parseInt(req.params.itemId);
-  const amount = parseInt(req.params.amount);
-
-  const tree = buildNode(db, itemId, amount);
+  const tree = await buildNode(itemId, amount);
 
   res.json(tree);
 }
 
-// 🔹 TOTAL (sin consumo)
-function craftTotal(req, res) {
-
-  const db = getDatabase();
+// 🔹 TOTAL
+async function craftTotal(req, res) {
 
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
-  const totals = aggregateMaterials(db, itemId, amount);
-  const inventory = getUserInventory(db);
+  const totals = await aggregateMaterials(itemId, amount);
+  const inventory = await getUserInventory();
 
   const materials = Object.entries(totals).map(([name, required]) => {
 
@@ -164,118 +136,83 @@ function craftTotal(req, res) {
 
   });
 
-  res.json({
-    materials
-  });
+  res.json({ materials });
 }
 
-// 🔥🔥🔥 CONSUMO REAL (LO IMPORTANTE)
-function executeCraft(req, res) {
-
-  const db = getDatabase();
+// 🔥 CONSUMO REAL
+async function executeCraft(req, res) {
 
   const itemId = parseInt(req.params.itemId);
   const amount = parseInt(req.params.amount);
 
-  if (!itemId || !amount) {
-    return res.status(400).json({ error: "itemId y amount requeridos" });
-  }
-
-  // 🔹 traer inventario
-  const inventoryRows = db.prepare(`
+  const invResult = await db.query(`
     SELECT ui.item_id, i.name, ui.quantity
     FROM user_inventory ui
     JOIN items i ON i.id = ui.item_id
-  `).all();
+  `);
 
   const inventory = {};
-  inventoryRows.forEach(i => {
+
+  invResult.rows.forEach(i => {
     inventory[i.name] = {
       id: i.item_id,
       quantity: i.quantity
     };
   });
 
-  const tree = buildNode(db, itemId, amount);
+  const tree = await buildNode(itemId, amount);
 
-  function process(node, needed) {
-
-    if (!node) return;
+  async function process(node, needed) {
 
     const inv = inventory[node.name];
-
     let available = inv ? inv.quantity : 0;
 
     const used = Math.min(available, needed);
 
-    if (inv) {
-      inv.quantity -= used;
-    }
+    if (inv) inv.quantity -= used;
 
     const remaining = needed - used;
 
     if (remaining === 0) return;
-	
-	// 🔥 verificar en DB si es crafteable
-	const recipe = db.prepare(`
-	  SELECT id FROM recipes WHERE result_item_id = ?
-	`).get(node.id);
 
-	if (remaining > 0 && !recipe) {
-	  throw new Error(`Faltan materiales base: ${node.name}`);
-	}
+    const recipeResult = await db.query(`
+      SELECT id FROM recipes WHERE result_item_id = $1
+    `, [node.id]);
 
-    if (node.materials && node.materials.length > 0) {
-
-      node.materials.forEach(child => {
-
-        const ratio = child.quantity / node.quantity;
-        const childNeeded = remaining * ratio;
-
-        process(child, childNeeded);
-
-      });
-
+    if (remaining > 0 && recipeResult.rows.length === 0) {
+      throw new Error(`Faltan materiales base: ${node.name}`);
     }
 
+    for (const child of node.materials) {
+      const ratio = child.quantity / node.quantity;
+      const childNeeded = remaining * ratio;
+      await process(child, childNeeded);
+    }
   }
 
-  // 🔥 aplicar consumo desde root
   try {
-
-	  tree.materials.forEach(child => {
-		process(child, child.quantity);
-	  });
-
-	} catch (err) {
-	  return res.status(400).json({
-		success: false,
-		error: err.message
-	  });
-	}
-  
-  // 🔹 guardar en DB
-  const update = db.prepare(`
-    UPDATE user_inventory
-    SET quantity = ?
-    WHERE item_id = ?
-  `);
-
-  const transaction = db.transaction(() => {
-
-    Object.values(inventory).forEach(item => {
-      update.run(item.quantity, item.id);
+    for (const child of tree.materials) {
+      await process(child, child.quantity);
+    }
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message
     });
+  }
 
-  });
-
-  transaction();
+  for (const item of Object.values(inventory)) {
+    await db.query(`
+      UPDATE user_inventory
+      SET quantity = $1
+      WHERE item_id = $2
+    `, [item.quantity, item.id]);
+  }
 
   res.json({ success: true });
 }
 
 module.exports = {
-  craftCalculator,
   craftTree,
   craftTotal,
   executeCraft
